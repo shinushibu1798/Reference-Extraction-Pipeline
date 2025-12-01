@@ -1,6 +1,12 @@
 
+# OpenAlex
 OPENALEX_BASE_URL = "https://api.openalex.org"
 OPENALEX_MAILTO = "shinu.shibu1798@gmail.com"
+
+# Semantic Scholar
+SEMANTIC_SCHOLAR_BASE_URL = "https://api.semanticscholar.org/graph/v1"
+SEMANTIC_SCHOLAR_TIMEOUT = 20
+SEMANTIC_SCHOLAR_API_KEY = ""
 
 # Hugging Face or Ollama model config
 # Hugging Face is much more faster than ollama

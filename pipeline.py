@@ -1,8 +1,12 @@
-from typing import Optional, Any
 import pandas as pd
+from typing import Optional, Any
 from pdf_utils import extract_text_from_pdf, split_into_references
 from dspy_models import parse_reference_with_dspy, infer_work_type, pick_best_match
 from openalex_client import fetch_openalex_candidates, extract_authors_from_work
+from semantic_scholar_client import (
+    fetch_semantic_scholar_candidates,
+    extract_authors_from_s2_paper,
+)
 
 
 def process_single_reference(ref_text: str) -> dict[str, Any]:
@@ -16,6 +20,10 @@ def process_single_reference(ref_text: str) -> dict[str, Any]:
     year = parsed.get("year")
     authors = parsed.get("authors", []) or []
     emails = parsed.get("emails", []) or []
+    parsed_first_affs = parsed.get("first_affiliations", []) or []
+    parsed_last_affs = parsed.get("last_affiliations", []) or []
+    parsed_first_emails = parsed.get("first_author_emails", []) or []
+    parsed_last_emails = parsed.get("last_author_emails", []) or []
     print(f"  Title: {paper_title!r}, Year: {year}, Authors: {authors}")
 
     # 2) Infer work type (for DSPy matching context / reporting)
@@ -49,7 +57,7 @@ def process_single_reference(ref_text: str) -> dict[str, Any]:
 
     # 5) Extract author info (OpenAlex or fallback)
     first_author_info = {"name": "", "affiliations": [], "emails": emails}
-    last_author_info = {"name": "", "affiliations": [], "emails": []}
+    last_author_info = {"name": "", "affiliations": [], "emails": parsed_last_emails}
     notes_parts: list[str] = []
 
     if best_work:
@@ -59,16 +67,71 @@ def process_single_reference(ref_text: str) -> dict[str, Any]:
         first_author_info = {
             "name": fa.get("name", ""),
             "affiliations": fa.get("affiliations", []),
-            "emails": emails,  # attach any emails from the reference
+            "emails": parsed_first_emails or emails,  # attach emails seen in the reference
         }
         last_author_info = {
             "name": la.get("name", ""),
             "affiliations": la.get("affiliations", []),
-            "emails": [],
+            "emails": parsed_last_emails,
         }
         notes_parts.append(f"Matched to {best_work.get('id', '')}")
     else:
+        # Use DSPy-derived affiliations/emails as fallbacks when OpenAlex doesn't match
+        first_author_info["affiliations"] = parsed_first_affs
+        last_author_info["affiliations"] = parsed_last_affs
+        if parsed_first_emails:
+            first_author_info["emails"] = parsed_first_emails
+        if parsed_last_emails:
+            last_author_info["emails"] = parsed_last_emails
         notes_parts.append("DSPy could not confidently match this reference to any OpenAlex work.")
+
+    # Secondary lookup: Semantic Scholar if no OpenAlex match
+    if not best_work:
+        print("  -> Semantic Scholar fallback search...")
+        s2_candidates = []
+        try:
+            s2_candidates = fetch_semantic_scholar_candidates(
+                paper_title, year
+            )
+        except Exception as e:
+            print(f"  Semantic Scholar error: {e}")
+            notes_parts.append(f"Semantic Scholar error: {e}")
+
+        if s2_candidates:
+            s2 = s2_candidates[0]
+            fa_s2, la_s2 = extract_authors_from_s2_paper(s2)
+            if fa_s2.get("name"):
+                first_author_info["name"] = first_author_info["name"] or fa_s2["name"]
+            if la_s2.get("name"):
+                last_author_info["name"] = last_author_info["name"] or la_s2["name"]
+            if fa_s2.get("affiliations"):
+                first_author_info["affiliations"] = first_author_info["affiliations"] or fa_s2["affiliations"]
+            if la_s2.get("affiliations"):
+                last_author_info["affiliations"] = last_author_info["affiliations"] or la_s2["affiliations"]
+            notes_parts.append("Filled from Semantic Scholar fallback.")
+            print("  Semantic Scholar fallback filled author info.")
+        else:
+            notes_parts.append("Semantic Scholar did not return matches (or was rate limited).")
+
+    if not last_author_info["emails"] and emails:
+        # If we saw emails but could not map to last author, at least surface them
+        last_author_info["emails"] = emails
+
+    # Final fallbacks to avoid empty columns
+    if not first_author_info["name"] and authors:
+        first_author_info["name"] = authors[0]
+    if not last_author_info["name"] and len(authors) > 1:
+        last_author_info["name"] = authors[-1]
+
+    if not first_author_info["affiliations"] and parsed_first_affs:
+        first_author_info["affiliations"] = parsed_first_affs
+    if not last_author_info["affiliations"] and parsed_last_affs:
+        last_author_info["affiliations"] = parsed_last_affs
+
+    if not first_author_info["emails"]:
+        first_author_info["emails"] = parsed_first_emails or emails
+    if not last_author_info["emails"] and parsed_last_emails:
+        last_author_info["emails"] = parsed_last_emails
 
     if match_rationale:
         notes_parts.append(f"DSPy rationale: {match_rationale}")

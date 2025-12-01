@@ -20,6 +20,11 @@ def fetch_openalex_candidates(title: str,
     if not title:
         return []
 
+    def normalize_last_name(name: str) -> str:
+        cleaned = re.sub(r"[^A-Za-z\s'-]", " ", name or "")
+        tokens = [t for t in cleaned.split() if t]
+        return tokens[-1] if tokens else ""
+
     clean_title = re.sub(r"[^\w\s]", " ", title)
     clean_title = " ".join(clean_title.split())
 
@@ -71,7 +76,7 @@ def fetch_openalex_candidates(title: str,
     search_query = clean_title
     if first_author:
         # still append only last token, but this is just a hint
-        last_name = first_author.split()[-1]
+        last_name = normalize_last_name(first_author)
         search_query = f"{clean_title} {last_name}"
 
     params2 = {

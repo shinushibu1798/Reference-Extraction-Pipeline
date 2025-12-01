@@ -28,6 +28,12 @@ class ParseReference(dspy.Signature):
     year = dspy.OutputField(desc="Four-digit year or 'null' if unsure.")
     authors_json = dspy.OutputField(desc='JSON array of author names, e.g. ["A. Author"].')
     emails_json = dspy.OutputField(desc="JSON array of emails in the reference (empty if none).")
+    authors_structured_json = dspy.OutputField(
+        desc=(
+            "JSON array of authors with optional affiliations/emails, "
+            'e.g. [{"name":"A. Author","affiliations":["MIT"],"emails":["a@x.com"]}].'
+        )
+    )
 
 
 class InferWorkType(dspy.Signature):
@@ -92,6 +98,38 @@ def parse_reference_with_dspy(ref_text: str) -> dict[str, Any]:
     paper_title = (pred.paper_title or "").strip()
     year_raw = (pred.year or "").strip()
 
+    def extract_emails(text: str) -> list[str]:
+        """Lightweight regex email catcher."""
+        pattern = r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}"
+        return re.findall(pattern, text)
+
+    def extract_affiliation_candidates(text: str) -> list[str]:
+        """
+        Grab phrases that look like affiliations (universities, institutes, departments).
+        Heuristic but helps when DSPy misses.
+        """
+        keywords = r"(university|institute|college|laboratory|lab\\b|department|dept\\b|school|centre|center|hospital)"
+        # capture up to ~8 words around the keyword
+        pattern = rf"(?:[A-Z][\\w,&'\\-]+\\s+){{0,6}}{keywords}(?:\\s+[A-Z][\\w,&'\\-]+){{0,6}}"
+        matches = re.findall(pattern, text, flags=re.IGNORECASE)
+        cleaned = []
+        for m in matches:
+            # re.findall with groups returns tuples; join parts
+            if isinstance(m, tuple):
+                joined = " ".join([p for p in m if p])
+                cleaned.append(joined.strip(" ,.;"))
+            else:
+                cleaned.append(str(m).strip(" ,.;"))
+        # de-duplicate while preserving order
+        seen = set()
+        result = []
+        for c in cleaned:
+            key = c.lower()
+            if key not in seen:
+                seen.add(key)
+                result.append(c)
+        return result
+
     # Parse JSON fields
     authors: list[str] = []
     emails: list[str] = []
@@ -100,9 +138,27 @@ def parse_reference_with_dspy(ref_text: str) -> dict[str, Any]:
             try:
                 parsed = json.loads(field)
                 if isinstance(parsed, list):
-                    target.extend(parsed)
+                    target.extend(str(p).strip() for p in parsed if isinstance(p, (str, int, float)))
             except Exception:
                 pass
+
+    structured_authors: list[dict[str, Any]] = []
+    if getattr(pred, "authors_structured_json", None):
+        try:
+            parsed_struct = json.loads(pred.authors_structured_json)
+            if isinstance(parsed_struct, list):
+                for entry in parsed_struct:
+                    if isinstance(entry, dict):
+                        name = str(entry.get("name", "")).strip()
+                        affs = entry.get("affiliations") or []
+                        ems = entry.get("emails") or []
+                        structured_authors.append({
+                            "name": name,
+                            "affiliations": [str(a).strip() for a in affs if str(a).strip()],
+                            "emails": [str(e).strip() for e in ems if str(e).strip()],
+                        })
+        except Exception:
+            pass
 
     # Extract year
     year: Optional[int] = None
@@ -111,7 +167,58 @@ def parse_reference_with_dspy(ref_text: str) -> dict[str, Any]:
         if m:
             year = int(m.group(1))
 
-    return {"paper_title": paper_title, "year": year, "authors": authors, "emails": emails}
+    # Derive first/last author fallbacks from structured hints
+    first_affiliations: list[str] = []
+    last_affiliations: list[str] = []
+    first_author_emails: list[str] = []
+    last_author_emails: list[str] = []
+
+    if structured_authors:
+        first_entry = structured_authors[0]
+        last_entry = structured_authors[-1]
+        first_affiliations = first_entry.get("affiliations", [])
+        last_affiliations = last_entry.get("affiliations", [])
+        first_author_emails = first_entry.get("emails", [])
+        last_author_emails = last_entry.get("emails", [])
+
+        # If names list is empty, backfill from structured entries
+        if not authors:
+            authors = [a.get("name", "") for a in structured_authors if a.get("name")]
+
+    # Regex fallbacks if structured extraction failed
+    regex_emails = extract_emails(ref_text)
+    if regex_emails:
+        # merge unique
+        existing = set(e.lower() for e in emails)
+        for e in regex_emails:
+            if e.lower() not in existing:
+                emails.append(e)
+                existing.add(e.lower())
+        if not first_author_emails:
+            first_author_emails = regex_emails
+        if not last_author_emails:
+            last_author_emails = regex_emails
+
+    if not first_affiliations or not last_affiliations:
+        affs = extract_affiliation_candidates(ref_text)
+        if affs:
+            if not first_affiliations:
+                first_affiliations = [affs[0]]
+            if not last_affiliations:
+                # if only one, share; else last
+                last_affiliations = [affs[-1] if len(affs) > 1 else affs[0]]
+
+    return {
+        "paper_title": paper_title,
+        "year": year,
+        "authors": authors,
+        "emails": emails,
+        "authors_structured": structured_authors,
+        "first_affiliations": first_affiliations,
+        "last_affiliations": last_affiliations,
+        "first_author_emails": first_author_emails or emails,
+        "last_author_emails": last_author_emails,
+    }
 
 
 def infer_work_type(ref_text: str) -> Optional[str]:

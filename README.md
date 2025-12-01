@@ -1,174 +1,63 @@
-Absolutely — here is a clean, professional **README.md** tailored exactly to your project structure and workflow. You can paste this directly into your repo.
+# Reference Extraction Pipeline
 
----
+Parse references from a PDF, match them to OpenAlex (with Semantic Scholar fallback), and export structured author metadata to Excel.
 
-# 📘 **Reference Extraction Pipeline**
+## What it extracts
+- Paper title and publication year
+- First/last author names, affiliations, and emails (from OpenAlex, Semantic Scholar, or parsed text fallbacks)
+- Raw reference text and processing notes
 
-### *PDF → DSPy Parsing → OpenAlex Matching → Structured Excel Output*
-
-This project extracts **paper titles**, **first/last author names**, **affiliations**, and **emails** from academic references stored in PDF files.
-It uses a hybrid pipeline combining:
-
-* **Llama 3 70B Instruct Model/Llama 4 Maverick** (via HuggingFace Inference API or Ollama)
-* **DSPy** for structured parsing, work-type inference, and match ranking
-* **OpenAlex API** for authoritative metadata
-* **Custom logic + fallback rules** for robust extraction
-* **Excel output** (via `openpyxl`)
-
----
-
-# 📁 Project Structure
-
+## Project layout
 ```
-project-root/
-│
-├── config.py
-├── dspy_models.py   
-├── openalex_client.py 
-├── pdf_utils.py 
-├── pipeline.py
-├── main.py
-│
-├── References.pdf
-└── output.xlsx
+config.py                 # API endpoints, model config, keys
+dspy_models.py            # DSPy signatures + parsing helpers
+openalex_client.py        # OpenAlex search + author extraction
+semantic_scholar_client.py# Semantic Scholar fallback search
+pdf_utils.py              # PDF text extraction and reference splitting
+pipeline.py               # End-to-end processing logic
+main.py                   # CLI entrypoint
+References.pdf            # Sample input
+output.xlsx               # Sample output
 ```
 
----
-
-# 🔧 Installation
-
-### 1. Create a virtual environment
-
+## Setup
+1) Create/activate a venv
 ```bash
 python -m venv .venv
-source .venv/bin/activate
+.\.venv\Scripts\activate
 ```
-
-### 2. Install required packages
-
+2) Install dependencies
 ```bash
 pip install -r requirements.txt
 ```
+3) Configure keys in `config.py`
+- `HUGGINGFACEHUB_API_TOKEN` (required for LLM)
+- `OPENALEX_MAILTO` (your contact email)
+- `SEMANTIC_SCHOLAR_API_KEY` (recommended to avoid 429s; fallback works without but may throttle)
 
----
-
-# 🔐 API Keys/Setting Up Models
-
-Set your HuggingFace API key for the LLM model and openalex API email address in config.py
-
-OR download local models via ollama and initialise the models by editing config.py and dspy_models.py accordingly.
-
-```bash
-ollama pull llama4:maverick
-```
-
----
-
-# ▶️ Running the Pipeline
-
+## Run
 ```bash
 python main.py --pdf References.pdf --out output.xlsx
 ```
-
-Optional: limit number of processed references (debugging):
-
+Limit processed references (useful for testing):
 ```bash
 python main.py --pdf References.pdf --out output.xlsx --max_refs 10
 ```
 
----
+## How it works
+1) `pdf_utils.py` extracts text and splits it into individual references.  
+2) `dspy_models.py` uses the LLM to pull title/year/authors/emails and structured author hints (affiliations/emails).  
+3) `openalex_client.py` searches OpenAlex (title/type/year + fallbacks) and extracts author names/affiliations when matched.  
+4) If OpenAlex fails, `semantic_scholar_client.py` queries Semantic Scholar (with API key support) to fill author names/affiliations.  
+5) `pipeline.py` reconciles data, fills missing fields with DSPy regex/heuristics, and writes rows to Excel with notes.
 
-# 🧠 How It Works
+## Output columns
+- `paper_title`, `year`
+- `first_author_name`, `first_author_affiliations`, `first_author_emails`
+- `last_author_name`, `last_author_affiliations`, `last_author_emails`
+- `reference_raw`, `notes`
 
-### **1. PDF Extraction**
-
-`pdf_utils.py` extracts raw text and splits it into individual references.
-
-### **2. DSPy Parsing**
-
-`dspy_models.py` uses Llama 4 to:
-
-* Extract title
-* Extract year
-* Extract author list
-* Extract emails
-* Infer work type (“book”, “journal-article”, etc.)
-
-### **3. OpenAlex Candidate Retrieval**
-
-`openalex_client.py` performs:
-
-* Stage 1: precise `title.search` query
-* Stage 2: fallback broad keyword search with year window
-
-### **4. DSPy Matching**
-
-`ChooseOpenAlexMatch` signature performs:
-
-* Title similarity ranking
-* Author surname overlap
-* Year proximity
-* Type consistency
-* Strict rejection of irrelevant works
-* Returns best OpenAlex ID + reasoning
-
-### **5. Final Assembly**
-
-`pipeline.py` builds:
-
-* First/last author info
-* Affiliations
-* Emails
-* DSPy rationale
-* Fallbacks to avoid empty rows
-
-And writes everything to Excel.
-
----
-
-# 📊 Output Format (Excel Columns)
-
-| Column                    | Description                            |
-| ------------------------- | -------------------------------------- |
-| paper_title               | Parsed or fallback title               |
-| year                      | Publication year                       |
-| first_author_name         | First author name (OpenAlex or parsed) |
-| first_author_affiliations | Clean semicolon-separated list         |
-| first_author_emails       | Emails from reference text             |
-| last_author_name          | Last author name                       |
-| last_author_affiliations  | Clean affiliations                     |
-| last_author_emails        | Usually empty (rare in refs)           |
-| reference_raw             | Original reference text                |
-| notes                     | DSPy chain of thought + match info     |
-
----
-
-# 🧪 Testing
-
-Try with a small number of references first:
-
-```bash
-python main.py --pdf References.pdf --out test_output.xlsx --max_refs 5
-```
-
----
-
-# 🎯 Future Improvements (Optional)
-
-* Add **Streamlit UI**
-* Add **local caching** of OpenAlex responses (huge speedup)
-* Use **DSPy BootstrapFewShot** to auto-improve ranking
-* Add **unit tests** for parsing and filtering
-* Package project as a pip module
-
----
-
-# 🙌 Credits
-
-* **DSPy** by Stanford NLP
-* **OpenAlex** for scholarly metadata
-* **Meta Llama 4 models** via Hugging Face Inference API
-
----
-
-
+## Tips for better results
+- Use `SEMANTIC_SCHOLAR_API_KEY` to reduce rate limits; without it, expect occasional skips.
+- Use smaller `--max_refs` while iterating.
+- Clean PDFs (good OCR) yield better title/author parsing and matches.
