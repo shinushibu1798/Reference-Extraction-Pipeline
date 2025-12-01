@@ -1,0 +1,6 @@
+pdfplumber
+pandas
+requests
+huggingface_hub>=0.24.0
+openpyxl
+dspy-ai
