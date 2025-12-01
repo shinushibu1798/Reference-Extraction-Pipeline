@@ -60,4 +60,3 @@ python main.py --pdf References.pdf --out output.xlsx --max_refs 10
 ## Tips for better results
 - Use `SEMANTIC_SCHOLAR_API_KEY` to reduce rate limits; without it, expect occasional skips.
 - Use smaller `--max_refs` while iterating.
-- Clean PDFs (good OCR) yield better title/author parsing and matches.
