@@ -55,11 +55,11 @@ class ChooseOpenAlexMatch(dspy.Signature):
         - type
         - authors: list of author display_names.
 
-    Task (be strict):
+    Task:
     1) For each candidate, compare title, authors, year, and type.
-    2) Reject clearly unrelated candidates.
-    3) Among remaining candidates, choose a single best match.
-    4) If none is clearly correct, output "none".
+    2) If a few things match but not all, explain the reasoning in the rationale and choose the candidate that fits best.  
+    3) There will be lots of discrepancies; evenso, try to pick an approximate match.  
+    4) If the title is an approximate match but year/authors/type are way off, you should still choose that candidate.
 
     Output:
     - chosen_id: OpenAlex work id of the chosen candidate, or "none".
