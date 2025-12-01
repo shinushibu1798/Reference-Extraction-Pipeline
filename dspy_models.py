@@ -3,14 +3,15 @@ import re
 import json
 
 from typing import List, Dict, Any, Optional, Tuple
-from config import MODEL_NAME, API_BASE, HUGGINGFACEHUB_API_TOKEN as HF_TOKEN
+#from config import MODEL_NAME, API_BASE ## uncomment if using ollama local server
+from config import MODEL_NAME, HUGGINGFACEHUB_API_TOKEN as HF_TOKEN
 
 # ===================== DSPY INITIALIZATION =====================
 
 
 lm = dspy.LM(
     model=MODEL_NAME,
-    api_base=API_BASE, ## uncomment if using ollama local server
+    #api_base=API_BASE, ## uncomment if using ollama local server
     api_key=HF_TOKEN,
     temperature=0.0,
     max_tokens=512,
